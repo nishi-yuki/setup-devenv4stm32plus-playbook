@@ -1,0 +1,139 @@
+---
+- hosts: localhost
+  tasks:
+
+    - name: udevルールファイルを配置
+      copy:
+        content: |
+          SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="02c4", MODE="0666"
+          SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="02d8", MODE="0666"
+          SUBSYSTEM=="usb", ATTR{idVendor}=="045e", ATTR{idProduct}=="02d9", MODE="0666"
+
+          SUBSYSTEM=="usb", KERNEL=="ttyUSB*", MODE="0666"
+          SUBSYSTEM=="usb", KERNEL=="ttyACM*", MODE="0666"
+
+          SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="3748", MODE="0666"
+          SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", MODE="0666"
+          SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", MODE="0666"
+      
+          SUBSYSTEM=="usb", ATTR{idVendor}=="05a9", ATTR{idProduct}=="058a", MODE="0666"
+        dest: /etc/udev/rules.d/50-ffstm.rules
+      become: yes
+    
+    - name: リポジトリの情報を更新
+      apt:
+        update_cache: yes
+      become: yes
+
+    - name: リポジトリからパッケージを取得
+      apt:
+        name: "{{ item }}"
+      with_items:
+        - lib32z1
+        - dh-autoreconf
+        - libusb-1.0-0-dev
+        - git
+        - cmake
+        - dfu-util
+        - scons
+      become: yes
+    
+    - name: arm用コンパイラのダウンロードと解凍
+      unarchive:
+        src: https://developer.arm.com/-/media/Files/downloads/gnu-rm/7-2018q2/gcc-arm-none-eabi-7-2018-q2-update-linux.tar.bz2
+        dest: /usr/local
+        remote_src: yes
+      become: yes
+      when: false
+    
+    - name: ディレクトリの存在確認
+      stat:
+        path: /usr/local/gcc-arm-none-eabi-7-2018-q2-update
+      register: unarchived
+
+    # - name: ディレクトリの存在確認
+    #   assert:
+    #     that: not "{{ unarchived.isdir }}"
+
+    - name: シンボリックリンクの作成
+      file:
+        src: /usr/local/gcc-arm-none-eabi-7-2018-q2-update
+        dest: /usr/local/arm-cs-tools
+        state: link
+      become: yes
+
+    - name: stlinkツールのダウンロード
+      git:
+        repo: https://github.com/texane/stlink.git
+        dest: /tmp/stlink
+        version: 1.2.0
+    
+    - name: stlinkツールのインストール
+      shell: |
+        mkdir build && cd build
+        cmake -DCMAKE_BUILD_TYPE=Debug ..
+        make
+        make install
+      args:
+        chdir: /tmp/stlink
+      become: yes
+    
+    - name:
+      git:
+        repo: https://github.com/andysworkshop/stm32plus.git
+        dest: /tmp/stm32plus
+
+    - name: stm32plseのビルド
+      shell: |
+        cd stm32plus
+        scons mode=small mcu=f1md hse=12000000 -j4 examples=no
+        scons mode=small mcu=f1hd hse=12000000 -j4 examples=no
+        scons mode=small mcu=f1md hse=8000000 -j4 examples=no
+        scons mode=small mcu=f1hd hse=8000000 -j4 examples=no
+        scons mode=small mcu=f4 hse=25000000 -j4 float=hard examples=no
+        scons mode=small mcu=f4 hse=8000000 -j4 float=hard examples=no
+        scons mode=small mcu=f4 hse=12000000 -j4 float=hard examples=no
+        scons mode=small mcu=f429 hse=8000000 -j4 float=hard examples=no
+        
+        if [ -e ~/workspace/stm32plus ]; then
+          echo "Delete old stm32plus files"
+          rm -rf ~/workspace/stm32plus
+        fi
+        
+        mkdir -p ~/workspace
+        mv ./lib ~/workspace/stm32plus
+        
+        cd  ~/workspace/stm32plus/build
+        
+        #To be compatible with old stm32plus
+        
+        cp -r small-f1hd-8000000e small-f1hd-8000000
+        cp -r small-f1hd-12000000e small-f1hd-12000000
+        cp -r small-f1md-8000000e small-f1md-8000000
+        cp -r small-f1md-12000000e small-f1md-12000000
+        cp -r small-f4-8000000e-hard small-f4-8000000-hard
+        cp -r small-f4-25000000e-hard small-f4-25000000-hard
+        cp -r small-f429-8000000e-hard small-f429-8000000-hard
+        
+        cd small-f1hd-8000000
+        cp libstm32plus-small-f1hd-8000000e.a libstm32plus-small-f1hd-8000000.a
+        
+        cd ../small-f1hd-12000000
+        cp libstm32plus-small-f1hd-12000000e.a libstm32plus-small-f1hd-12000000.a
+        
+        cd ../small-f1md-8000000
+        cp libstm32plus-small-f1md-8000000e.a libstm32plus-small-f1md-8000000.a
+        
+        cd ../small-f1md-12000000
+        cp libstm32plus-small-f1md-12000000e.a libstm32plus-small-f1md-12000000.a
+        
+        cd ../small-f4-8000000-hard
+        cp libstm32plus-small-f4-8000000e-hard.a libstm32plus-small-f4-8000000-hard.a
+        
+        cd ../small-f4-25000000-hard
+        cp libstm32plus-small-f4-25000000e-hard.a libstm32plus-small-f4-25000000-hard.a
+        
+        cd ../small-f429-8000000-hard
+        cp libstm32plus-small-f429-8000000e-hard.a libstm32plus-small-f429-8000000-hard.a
+      args:
+        chdir: /tmp/
